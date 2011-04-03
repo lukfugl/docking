@@ -1,0 +1,3 @@
+run "python example.py" to see it in action. right now, it's parsing the 2PWS.xbgf file and scoring the chain against itself... it has a divide by zero check, so when an atom is scored against itself, it's zero, not +/- infinity. what we really want is a file with two chains in it (one for the protein, one for the ligand), then we can score the chains against each other, and rotate just the ligand to find an optimal configuration.
+
+performance is not terrible, but not terrific, either... I'll be looking into that a little more.
