@@ -50,6 +50,7 @@ class XBGFParser:
         if isinstance(file, basestring):
             file=open(file)
         self.charges = dict()
+        self.chain_suffix = 0
         self._parse(file.readlines())
         self.structure = self.structure_builder.get_structure()
         return self._process_structure()
@@ -67,12 +68,7 @@ class XBGFParser:
             self.structure_builder.set_line_counter(self.line_counter)
             line = lines[i]
             if line[0:6] == 'ATOM  ':
-                self._parse_atom(line)
-
-    def _parse_atom(self, line):
-        self._update_chain(line)
-        self._update_residue(line)
-        self._update_atom(line)
+                self._update_atom(line)
 
     def _update_chain(self, line):
         chain_id = self._extract_chain(line)
@@ -88,6 +84,14 @@ class XBGFParser:
     def _update_residue(self, line):
         resseq, resname, hetero_flag = self._extract_residue(line)
         residue_id = (hetero_flag, resseq, " ")
+        if hetero_flag == 'W':
+            # ignore water residues
+            return False
+        if self.current_residue_id and hetero_flag != self.current_residue_id[0]:
+            # moving from protien to ligand or vice versa, reset chain
+            self.current_chain_id = None
+            self.chain_suffix += 1
+        self._update_chain(line)
         if self.current_residue_id != residue_id or self.current_resname != resname:
             try:
                 self.structure_builder.init_residue(resname, hetero_flag, resseq, " ")
@@ -95,8 +99,12 @@ class XBGFParser:
                 self.current_resname = resname
             except PDBConstructionException, message:
                 self._handle_PDB_exception(message) 
+        return True
 
     def _update_atom(self, line):
+        # _update_residue returns False for water residues, which we ignore
+        if not self._update_residue(line):
+            return
         fullname, name = self._extract_name(line)
         serial_number = self._extract_serial_number(line)
         coord = self._extract_coord(line)
@@ -109,14 +117,15 @@ class XBGFParser:
         except PDBConstructionException, message:
             self._handle_PDB_exception(message)
             return
-        self.charges[self.structure_builder.atom] = self._extract_charge(line)
+        self.charges[self.structure_builder.atom] = self._extract_charge(line,
+                self.structure_builder.atom)
 
     def _extract_chain(self, line):
-        return line[25:26]
+        return "%s%d" % (line[25:26], self.chain_suffix)
 
     def _extract_residue(self, line):
         resseq = int(line[27:32].split()[0])
-        resname = line[20:24]
+        resname = line[20:24].split()[0]
         if is_aa(resname):
             hetero_flag = " "
         elif resname == "HOH" or resname == "WAT":
@@ -174,9 +183,15 @@ class XBGFParser:
             self._handle_PDB_exception("Invalid or missing element")
             return ""
 
-    def _extract_charge(self, line):
+    def _extract_charge(self, line, atom):
         try:
-            return float(line[74:82])
+            charge = float(line[74:82])
+            if charge == 0 and self.current_residue_id[0] == 'H':
+                if atom.element == 'O':
+                    charge = -0.5
+                elif atom.element == 'C':
+                    charge = +0.1
+            return charge
         except:
             self._handle_PDB_exception("Invalid or missing charge")
             return 0
